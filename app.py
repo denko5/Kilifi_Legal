@@ -1,10 +1,8 @@
 # Standard Library
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date # Added 'date'
 from io import BytesIO
-from sqlalchemy import case
-
 
 # Flask Core
 from flask import (
@@ -24,40 +22,48 @@ from flask_migrate import Migrate
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
-# PDF & Reporting
+# Database Query Utilities
+from sqlalchemy import case, func, extract # Added func and extract for statistics
+
+# PDF & Reporting (Using reportlab for the specific PDF header requirements)
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
-from fpdf import FPDF
+from reportlab.lib.units import inch # Added for cleaner spacing
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle # Added for text styling
+from reportlab.platypus import Paragraph
+from fpdf import FPDF # Existing import (kept for completeness, though reportlab is used for new PDF)
 
 # Data Handling
 import pandas as pd
 
 # SQLAlchemy Models
-from models import db, User, Case, Document, ContactMessage
+# IMPORTANT: Ensure VisitorLog is correctly imported from models.py
+from models import db, User, Case, Document, ContactMessage, VisitorLog 
 
 
+# Database Driver setup
 import pymysql
 pymysql.install_as_MySQLdb()
 
 
-# Initialize Flask app
-# app = Flask(__name__)
-# app.config['SECRET_KEY'] = 'your_strong_secret_key'
-# app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:password@localhost/kilifi_casess'
-# app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL').replace('mysql://root:EqKeTBDdQnjMkXhwMSxBhJYnLLxFcrGR@mysql.railway.internal:3306/railway', 'mysql+pymysql://root:password@localhost/kilifi_casess')
-# app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL').replace('mysql://', 'mysql+pymysql://')
-# app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-
-# Initialize Flask app
+#Initialize Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_strong_secret_key'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:password@localhost/kilifi_casess'
+# app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL').replace('mysql://root:EqKeTBDdQnjMkXhwMSxBhJYnLLxFcrGR@mysql.railway.internal:3306/railway', 'mysql+pymysql://root:password@localhost/kilifi_casess')
 # app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL').replace('mysql://', 'mysql+pymysql://')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-raw_db_url = os.environ.get('DATABASE_URL', '')
-# app.config['SQLALCHEMY_DATABASE_URI'] = raw_db_url.replace('mysql://', 'mysql+pymysql://') if raw_db_url else 'sqlite:///fallback.db'
-app.config['SQLALCHEMY_DATABASE_URI'] = raw_db_url if raw_db_url else 'sqlite:///fallback.db'
+
+# # Initialize Flask app
+# app = Flask(__name__)
+# app.config['SECRET_KEY'] = 'your_strong_secret_key'
+# # app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL').replace('mysql://', 'mysql+pymysql://')
+# app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# raw_db_url = os.environ.get('DATABASE_URL', '')
+# # app.config['SQLALCHEMY_DATABASE_URI'] = raw_db_url.replace('mysql://', 'mysql+pymysql://') if raw_db_url else 'sqlite:///fallback.db'
+# app.config['SQLALCHEMY_DATABASE_URI'] = raw_db_url if raw_db_url else 'sqlite:///fallback.db'
 
 # File upload config
 UPLOAD_FOLDER = os.path.join(app.root_path, 'uploads')
@@ -72,8 +78,8 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-with app.app_context():
-    db.create_all()
+# with app.app_context():
+#     db.create_all()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -816,12 +822,270 @@ def bulk_schedule():
 
 
 
-# if __name__ == '__main__':
-#     with app.app_context():
-#         db.create_all()
-#     app.run(host="0.0.0.0", port=5001, debug=True)
+# --- Add these new routes to your existing app.py file ---
+
+@app.route('/visitor-log-in', methods=['GET', 'POST'])
+@login_required
+def visitor_log_in():
+    """Route to register a new visitor/delivery."""
+    if request.method == 'POST':
+        try:
+            # 1. Capture Form Data
+            name = request.form['visitor_name']
+            id_num = request.form.get('id_number')
+            phone = request.form.get('phone_number')
+            purpose_cat = request.form['purpose_category'] 
+            person_to_see = request.form['person_to_see']
+            reason_detail = request.form['reason']
+            remarks = request.form.get('remarks')
+            
+            # 2. Create New Log Entry
+            new_log = VisitorLog(
+                visitor_name=name,
+                id_number=id_num,
+                phone_number=phone,
+                purpose_category=purpose_cat,
+                person_to_see=person_to_see,
+                reason=reason_detail,
+                remarks=remarks,
+                time_in=datetime.utcnow(),
+                status='Active'
+            )
+
+            # 3. Save to Database
+            db.session.add(new_log)
+            db.session.commit()
+            
+            flash(f"Visitor/Delivery from '{name}' successfully logged in. Log ID: {new_log.id}", 'success')
+            return redirect(url_for('visitor_dashboard'))
+
+        except Exception as e:
+            db.session.rollback()
+            # In a production system, log the full exception
+            flash(f"An error occurred during log in. Please check the required fields. Error: {e}", 'danger')
+            return redirect(url_for('visitor_log_in'))
+
+    return render_template('visitor_log_in.html', title='Visitor Log In')
+
+
+@app.route('/visitor-dashboard')
+@login_required
+def visitor_dashboard():
+    """Route to view active, recent, and statistical visitor data."""
+    
+    now = datetime.utcnow()
+    
+    # 1. Statistics Calculation
+    
+    # Time boundaries (using UTC datetime objects)
+    today_start = datetime.combine(now.date(), datetime.min.time())
+    week_start = now - timedelta(days=now.weekday())
+    month_start = datetime(now.year, now.month, 1)
+    year_start = datetime(now.year, 1, 1)
+
+    # Use SQLAlchemy func.count() for efficiency
+    stats = {
+        'today_count': db.session.query(VisitorLog).filter(
+            VisitorLog.time_in >= today_start
+        ).count(),
+        'week_count': db.session.query(VisitorLog).filter(
+            VisitorLog.time_in >= week_start
+        ).count(),
+        'month_count': db.session.query(VisitorLog).filter(
+            VisitorLog.time_in >= month_start
+        ).count(),
+        'year_count': db.session.query(VisitorLog).filter(
+            VisitorLog.time_in >= year_start
+        ).count(),
+    }
+    
+    # 2. Log Queries
+    active_logs = VisitorLog.query.filter_by(status='Active').order_by(VisitorLog.time_in.desc()).all()
+    closed_logs = VisitorLog.query.filter_by(status='Signed Out').order_by(VisitorLog.time_out.desc()).limit(20).all()
+    
+    return render_template('visitor_dashboard.html', 
+                           active_logs=active_logs, 
+                           closed_logs=closed_logs,
+                           stats=stats, # Pass statistics to template
+                           now=now,
+                           title='Visitor Log Dashboard')
+
+# --- EXPORT ROUTES ---
+
+@app.route('/export/visitors/excel')
+@login_required
+def export_visitors_excel():
+    """Exports all visitor log data to an Excel file."""
+    logs = VisitorLog.query.order_by(VisitorLog.time_in.desc()).all()
+    
+    data = [{
+        "ID": log.id,
+        "Visitor Name": log.visitor_name,
+        "ID Number": log.id_number,
+        "Phone Number": log.phone_number,
+        "Purpose Category": log.purpose_category,
+        "Officer/Section": log.person_to_see,
+        "Reason / Details": log.reason,
+        "Remarks": log.remarks,
+        "Time In": log.time_in.strftime('%Y-%m-%d %H:%M:%S'),
+        "Time Out": log.time_out.strftime('%Y-%m-%d %H:%M:%S') if log.time_out else 'N/A',
+        "Status": log.status
+    } for log in logs]
+
+    df = pd.DataFrame(data)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # Sheet name reflects the report content
+        df.to_excel(writer, index=False, sheet_name='Visitor_Log_Report')
+    output.seek(0)
+    
+    flash('Visitor Log successfully exported to Excel.', 'success')
+    return send_file(
+        output, 
+        download_name=f"visitor_log_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", 
+        as_attachment=True
+    )
+
+
+@app.route('/export/visitors/pdf')
+@login_required
+def export_visitors_pdf():
+    """Exports all visitor log data to a PDF file with corporate header."""
+    
+    logs = VisitorLog.query.order_by(VisitorLog.time_in.desc()).all()
+    
+    # Define Corporate Details (Customize these as needed)
+    OFFICE_NAME = "Office of the County Attorney"
+    COUNTY_NAME = "Kilifi County Government"
+    OFFICE_ADDRESS = "P.O Box 80-80108, Kilifi, Kenya"
+    OFFICE_CONTACT = "Tel: +254 7XX XXX XXX"
+    OFFICE_EMAIL = "legal@kilifi.go.ke"
+    REPORT_TITLE = "Visitor and Delivery Log Report"
+    
+    buffer = BytesIO()
+    p = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='ReportHeader', alignment=1, fontSize=16, fontName='Helvetica-Bold'))
+    styles.add(ParagraphStyle(name='SubHeader', alignment=1, fontSize=10, fontName='Helvetica'))
+    styles.add(ParagraphStyle(name='SmallText', fontSize=8, fontName='Helvetica'))
+
+    # --- HEADER SECTION ---
+    y_pos = height - 50 # Starting position
+    
+    # 1. Logo (Placeholder - assume a logo.png exists in static/)
+    logo_path = os.path.join(app.root_path, 'static', 'logo.png')
+    if os.path.exists(logo_path):
+        p.drawImage(logo_path, 40, y_pos - 10, width=50, height=40)
+    
+    # 2. Office Information (Top Left)
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(100, y_pos, COUNTY_NAME)
+    y_pos -= 15
+    p.setFont("Helvetica", 10)
+    p.drawString(100, y_pos, OFFICE_NAME)
+    y_pos -= 15
+    p.setFont("Helvetica", 8)
+    p.drawString(100, y_pos, f"Address: {OFFICE_ADDRESS}")
+    y_pos -= 10
+    p.drawString(100, y_pos, f"Contact: {OFFICE_CONTACT} | Email: {OFFICE_EMAIL}")
+    y_pos -= 25
+
+    # 3. Report Title (Centered)
+    p.setFont("Helvetica-Bold", 14)
+    p.drawCentredString(width/2, y_pos, REPORT_TITLE)
+    y_pos -= 20
+    
+    # 4. Horizontal Line
+    p.line(40, y_pos, width - 40, y_pos)
+    y_pos -= 30
+    
+    # 5. Metadata
+    p.setFont("Helvetica-Oblique", 8)
+    p.drawString(40, y_pos, f"Report Generated by: {current_user.full_name} on {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    y_pos -= 20
+
+    # --- TABLE DATA SECTION ---
+    
+    # Headers
+    p.setFont("Helvetica-Bold", 8)
+    p.drawString(40, y_pos, "Time In")
+    p.drawString(110, y_pos, "Visitor Name")
+    p.drawString(240, y_pos, "Officer/Section")
+    p.drawString(350, y_pos, "Purpose (Category)")
+    p.drawString(450, y_pos, "Time Out")
+    p.line(40, y_pos - 2, width - 40, y_pos - 2)
+    y_pos -= 12
+    
+    p.setFont("Helvetica", 8)
+    
+    for log in logs:
+        # Check for page break
+        if y_pos < 50:
+            p.showPage()
+            y_pos = height - 50
+            # Redraw headers on new page
+            p.setFont("Helvetica-Bold", 8)
+            p.drawString(40, y_pos, "Time In")
+            p.drawString(110, y_pos, "Visitor Name")
+            p.drawString(240, y_pos, "Officer/Section")
+            p.drawString(350, y_pos, "Purpose (Category)")
+            p.drawString(450, y_pos, "Time Out")
+            p.line(40, y_pos - 2, width - 40, y_pos - 2)
+            y_pos -= 12
+            p.setFont("Helvetica", 8)
+
+        # Print data row
+        p.drawString(40, y_pos, log.time_in.strftime('%Y-%m-%d %H:%M'))
+        p.drawString(110, y_pos, log.visitor_name[:25]) # Truncate long names
+        p.drawString(240, y_pos, log.person_to_see[:20])
+        p.drawString(350, y_pos, log.purpose_category)
+        p.drawString(450, y_pos, log.time_out.strftime('%H:%M') if log.time_out else 'Active')
+        
+        # Add reason below the main row (smaller font)
+        reason_text = f"Detail: {log.reason}"
+        p.setFont("Helvetica-Oblique", 7)
+        p.drawString(110, y_pos - 8, reason_text[:70] + "..." if len(reason_text) > 73 else reason_text)
+        p.setFont("Helvetica", 8)
+        
+        y_pos -= 20
+        
+    # --- END DOCUMENT ---
+    p.save()
+    buffer.seek(0)
+    
+    return send_file(
+        buffer, 
+        download_name=f"visitor_log_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf", 
+        as_attachment=True,
+        mimetype='application/pdf'
+    )
+
+
+@app.route('/visitor-log-out/<int:log_id>', methods=['POST'])
+@login_required
+def visitor_log_out(log_id):
+    """Function to sign out an existing visitor."""
+    log_entry = VisitorLog.query.get_or_404(log_id)
+
+    if log_entry.status == 'Active':
+        log_entry.time_out = datetime.utcnow()
+        log_entry.status = 'Signed Out'
+        db.session.commit()
+        flash(f"Visitor '{log_entry.visitor_name}' (ID: {log_entry.id}) successfully signed out.", 'info')
+    else:
+        flash(f"Log ID {log_id} is already signed out.", 'warning')
+        
+    return redirect(url_for('visitor_dashboard'))
+
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    with app.app_context():
+        db.create_all()
+    app.run(host="0.0.0.0", port=5001, debug=True)
+
+
+# if __name__ == '__main__':
+#     port = int(os.environ.get('PORT', 5000))
+#     app.run(host='0.0.0.0', port=port)

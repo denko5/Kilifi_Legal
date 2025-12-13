@@ -106,3 +106,28 @@ class ContactMessage(db.Model):
 
     replier = db.relationship('User', foreign_keys=[replied_by])
 
+
+
+class VisitorLog(db.Model):
+    __tablename__ = 'visitor_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # === Visitor Personal Details (from Excel) ===
+    visitor_name = db.Column(db.String(100), nullable=False, index=True) # Maps to NAME
+    id_number = db.Column(db.String(20), nullable=True, index=True) # Maps to ID NO.
+    phone_number = db.Column(db.String(20), nullable=True) # Maps to PHONE NO.
+
+    # === Visit Details ===
+    purpose_category = db.Column(db.String(50), nullable=False) # e.g., 'Official', 'Delivery', 'Personal'
+    person_to_see = db.Column(db.String(100), nullable=False) # The officer/department they want to meet
+    reason = db.Column(db.Text, nullable=False) # Detailed reason or description of supplies (Maps to PURPOSE OF VISIT)
+    remarks = db.Column(db.Text, nullable=True) # Additional notes (Maps to REMARKS)
+    
+    # === Timing & Status (from Excel) ===
+    time_in = db.Column(db.DateTime, nullable=False, default=datetime.utcnow) # Maps to DATE & TIME IN
+    time_out = db.Column(db.DateTime, nullable=True) # Maps to TIME OUT
+    status = db.Column(db.String(20), nullable=False, default='Active', index=True) # 'Active' or 'Signed Out'
+
+    def __repr__(self):
+        return f"<VisitorLog id={self.id} name='{self.visitor_name}' person='{self.person_to_see}'>"
