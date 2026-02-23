@@ -46,30 +46,26 @@ import pymysql
 pymysql.install_as_MySQLdb()
 
 
-#Initialize Flask app
+# ==================== RAILWAY PRODUCTION CONFIG ====================
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your_strong_secret_key'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:password@localhost/kilifi_casess'
-# app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL').replace('mysql://root:EqKeTBDdQnjMkXhwMSxBhJYnLLxFcrGR@mysql.railway.internal:3306/railway', 'mysql+pymysql://root:password@localhost/kilifi_casess')
-# app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL').replace('mysql://', 'mysql+pymysql://')
+
+# === SECURITY & DATABASE (from Railway Environment Variables) ===
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
+if not app.config.get('SECRET_KEY'):
+    raise RuntimeError("❌ SECRET_KEY environment variable is required!")
+
+# Railway automatically provides DATABASE_URL when you add MySQL plugin
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
+if not app.config.get('SQLALCHEMY_DATABASE_URI'):
+    raise RuntimeError("❌ DATABASE_URL environment variable is required!")
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-
-# # Initialize Flask app
-# app = Flask(__name__)
-# app.config['SECRET_KEY'] = 'your_strong_secret_key'
-# # app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL').replace('mysql://', 'mysql+pymysql://')
-# app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# raw_db_url = os.environ.get('DATABASE_URL', '')
-# # app.config['SQLALCHEMY_DATABASE_URI'] = raw_db_url.replace('mysql://', 'mysql+pymysql://') if raw_db_url else 'sqlite:///fallback.db'
-# app.config['SQLALCHEMY_DATABASE_URI'] = raw_db_url if raw_db_url else 'sqlite:///fallback.db'
-
-# File upload config
+# File upload folder (works on Railway)
 UPLOAD_FOLDER = os.path.join(app.root_path, 'uploads')
-ALLOWED_EXTENSIONS = {'pdf', 'docx', 'jpg', 'png'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# ================================================================
 
 # Initialize extensions
 db.init_app(app)
@@ -1081,9 +1077,11 @@ def visitor_log_out(log_id):
 
 
 if __name__ == '__main__':
+    # Local development only
     with app.app_context():
         db.create_all()
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    port = int(os.environ.get('PORT', 5001))
+    app.run(host='0.0.0.0', port=port, debug=True)
 
 
 # if __name__ == '__main__':
