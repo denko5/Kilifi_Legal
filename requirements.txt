@@ -86,7 +86,7 @@ networkx==3.3
 # ngrok==1.5.1
 notebook==7.2.0
 notebook_shim==0.2.4
-numba==0.59.1
+# numba==0.59.1
 numpy==1.26.4
 onnxruntime==1.18.0
 opencv-python-headless==4.10.0.82
