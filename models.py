@@ -2,11 +2,8 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from datetime import datetime
 
-# ────────────────────────────────────────────────
-#  SINGLE GLOBAL SQLAlchemy INSTANCE – DO NOT CALL init_app() HERE
-# ────────────────────────────────────────────────
+# Create the SINGLE global instance – NEVER call init_app() here
 db = SQLAlchemy()
-
 # ────────────────────────────────────────────────
 # MODELS
 # ────────────────────────────────────────────────
