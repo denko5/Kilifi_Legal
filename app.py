@@ -18,7 +18,6 @@ from flask import (
 )
 
 # Flask Extensions
-from flask_sqlalchemy import SQLAlchemy
 from flask_login import (
     LoginManager,
     login_user,
@@ -43,63 +42,59 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import Paragraph
 from fpdf import FPDF
 
-# Data Handling – only import if actually used in production routes
-# Comment out if not needed in the main web app (move to reporting script if possible)
+# Data Handling (guarded – only if used in active routes)
 try:
     import pandas as pd
 except ImportError:
-    pd = None  # will be checked/handled where used
+    pd = None
 
-# Models – must be imported after db is defined
+# ────────────────────────────────────────────────
+# MODELS – import the SINGLE db instance
+# ────────────────────────────────────────────────
 from models import db, User, Case, Document, ContactMessage, VisitorLog
 
-# MySQL driver (needed for pymysql)
+# MySQL driver
 import pymysql
 pymysql.install_as_MySQLdb()
 
 # ────────────────────────────────────────────────
-#            FLASK APPLICATION INITIALIZATION
+#            APPLICATION & CONFIGURATION
 # ────────────────────────────────────────────────
 
 app = Flask(__name__)
 
-# ──── Security ──────────────────────────────────
+# Security – must be set via environment
 secret_key = os.environ.get('SECRET_KEY')
 if not secret_key:
-    raise RuntimeError(
-        "SECRET_KEY environment variable is required.\n"
-        "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
-    )
+    raise RuntimeError("SECRET_KEY environment variable is required.")
 app.config['SECRET_KEY'] = secret_key
 
-# ──── Database ──────────────────────────────────
+# Database – Railway provides this
 db_url = os.environ.get('DATABASE_URL')
 if not db_url:
-    raise RuntimeError(
-        "DATABASE_URL environment variable is required.\n"
-        "This should be automatically provided by Railway when a MySQL service is attached."
-    )
+    raise RuntimeError("DATABASE_URL environment variable is required.")
 
-# Railway often gives mysql:// → we need mysql+pymysql:// for SQLAlchemy
-if db_url.startswith("mysql://"):
-    db_url = db_url.replace("mysql://", "mysql+pymysql://", 1)
+# Fix scheme if necessary (Railway sometimes uses mysql://)
+if db_url.startswith('mysql://'):
+    db_url = db_url.replace('mysql://', 'mysql+pymysql://', 1)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_pre_ping': True,      # detect broken connections
-    'pool_recycle': 3600,       # recycle after 1 hour
-    'pool_size': 5,
-    'max_overflow': 10
+    'pool_pre_ping': True,
+    'pool_recycle': 3600,
 }
 
-# ──── File Uploads ──────────────────────────────
+# File uploads
 UPLOAD_FOLDER = os.path.join(app.root_path, 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# ──── Extensions Initialization ─────────────────
-db.init_app(app)
+# ────────────────────────────────────────────────
+#            EXTENSIONS – INITIALIZE ONCE
+# ────────────────────────────────────────────────
+
+db.init_app(app)           # ← ONLY HERE
 migrate = Migrate(app, db)
 
 login_manager = LoginManager()
