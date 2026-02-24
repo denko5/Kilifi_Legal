@@ -51,6 +51,9 @@ except ImportError:
 # ────────────────────────────────────────────────
 # MODELS – import the SINGLE db instance
 # ────────────────────────────────────────────────
+# ... all your imports remain the same ...
+
+# Import the SINGLE db instance from models.py
 from models import db, User, Case, Document, ContactMessage, VisitorLog
 
 # MySQL driver
@@ -63,7 +66,7 @@ pymysql.install_as_MySQLdb()
 
 app = Flask(__name__)
 
-# Security – must be set via environment
+# Security
 secret_key = os.environ.get('SECRET_KEY')
 if not secret_key:
     raise RuntimeError("SECRET_KEY environment variable is required.")
@@ -73,8 +76,6 @@ app.config['SECRET_KEY'] = secret_key
 db_url = os.environ.get('DATABASE_URL')
 if not db_url:
     raise RuntimeError("DATABASE_URL environment variable is required.")
-
-# Fix scheme if necessary (Railway sometimes uses mysql://)
 if db_url.startswith('mysql://'):
     db_url = db_url.replace('mysql://', 'mysql+pymysql://', 1)
 
@@ -91,10 +92,12 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ────────────────────────────────────────────────
-#            EXTENSIONS – INITIALIZE ONCE
+#            EXTENSIONS – INITIALIZE ONLY ONCE
 # ────────────────────────────────────────────────
 
-db.init_app(app)           # ← ONLY HERE
+# This is the ONLY place where db.init_app(app) is allowed
+db.init_app(app)
+
 migrate = Migrate(app, db)
 
 login_manager = LoginManager()
