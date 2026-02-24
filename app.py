@@ -113,7 +113,6 @@ if os.environ.get('FLASK_ENV') == 'development':
     app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 # Initialize extensions
-db.init_app(app)
 migrate = Migrate(app, db)
 login_manager = LoginManager()
 login_manager.init_app(app)
