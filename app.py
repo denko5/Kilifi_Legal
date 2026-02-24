@@ -1,20 +1,30 @@
 # Standard Library
 import os
 import secrets
-from datetime import datetime, timedelta, date # Added 'date'
+from datetime import datetime, timedelta, date
 from io import BytesIO
 
 # Flask Core
 from flask import (
-    Flask, render_template, request, redirect, url_for,
-    flash, send_file, abort, make_response
+    Flask,
+    render_template,
+    request,
+    redirect,
+    url_for,
+    flash,
+    send_file,
+    abort,
+    make_response
 )
 
 # Flask Extensions
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import (
-    LoginManager, login_user, logout_user,
-    login_required, current_user
+    LoginManager,
+    login_user,
+    logout_user,
+    login_required,
+    current_user
 )
 from flask_migrate import Migrate
 
@@ -23,49 +33,86 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
 # Database Query Utilities
-from sqlalchemy import case, func, extract # Added func and extract for statistics
+from sqlalchemy import case, func, extract
 
-# PDF & Reporting (Using reportlab for the specific PDF header requirements)
+# PDF & Reporting
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import inch # Added for cleaner spacing
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle # Added for text styling
+from reportlab.lib.units import inch
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import Paragraph
-from fpdf import FPDF # Existing import (kept for completeness, though reportlab is used for new PDF)
+from fpdf import FPDF
 
-# Data Handling
-import pandas as pd
+# Data Handling – only import if actually used in production routes
+# Comment out if not needed in the main web app (move to reporting script if possible)
+try:
+    import pandas as pd
+except ImportError:
+    pd = None  # will be checked/handled where used
 
-# SQLAlchemy Models
-# IMPORTANT: Ensure VisitorLog is correctly imported from models.py
-from models import db, User, Case, Document, ContactMessage, VisitorLog 
+# Models – must be imported after db is defined
+from models import db, User, Case, Document, ContactMessage, VisitorLog
 
-
-# Database Driver setup
+# MySQL driver (needed for pymysql)
 import pymysql
 pymysql.install_as_MySQLdb()
 
+# ────────────────────────────────────────────────
+#            FLASK APPLICATION INITIALIZATION
+# ────────────────────────────────────────────────
 
-# ==================== RAILWAY PRODUCTION CONFIG ====================
 app = Flask(__name__)
 
-# === SECURITY & DATABASE (from Railway Environment Variables) ===
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
-if not app.config.get('SECRET_KEY'):
-    raise RuntimeError("❌ SECRET_KEY environment variable is required!")
+# ──── Security ──────────────────────────────────
+secret_key = os.environ.get('SECRET_KEY')
+if not secret_key:
+    raise RuntimeError(
+        "SECRET_KEY environment variable is required.\n"
+        "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+    )
+app.config['SECRET_KEY'] = secret_key
 
-# Railway automatically provides DATABASE_URL when you add MySQL plugin
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
-if not app.config.get('SQLALCHEMY_DATABASE_URI'):
-    raise RuntimeError("❌ DATABASE_URL environment variable is required!")
+# ──── Database ──────────────────────────────────
+db_url = os.environ.get('DATABASE_URL')
+if not db_url:
+    raise RuntimeError(
+        "DATABASE_URL environment variable is required.\n"
+        "This should be automatically provided by Railway when a MySQL service is attached."
+    )
 
+# Railway often gives mysql:// → we need mysql+pymysql:// for SQLAlchemy
+if db_url.startswith("mysql://"):
+    db_url = db_url.replace("mysql://", "mysql+pymysql://", 1)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,      # detect broken connections
+    'pool_recycle': 3600,       # recycle after 1 hour
+    'pool_size': 5,
+    'max_overflow': 10
+}
 
-# File upload folder (works on Railway)
+# ──── File Uploads ──────────────────────────────
 UPLOAD_FOLDER = os.path.join(app.root_path, 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-# ================================================================
+
+# ──── Extensions Initialization ─────────────────
+db.init_app(app)
+migrate = Migrate(app, db)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+login_manager.login_message = "Please log in to access this page."
+login_manager.login_message_category = "info"
+
+# ──── Optional: Debug / Development only ────────
+# Do NOT enable in production
+if os.environ.get('FLASK_ENV') == 'development':
+    app.config['DEBUG'] = True
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 # Initialize extensions
 db.init_app(app)
